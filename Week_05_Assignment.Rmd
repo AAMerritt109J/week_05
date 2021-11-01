@@ -23,8 +23,13 @@ pacman::p_load(
 
 ```{r}
 
-url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv"
+url <- read.csv(url("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv"))
 ```
+
+```{r}
+url
+```
+
 
 2. There are several columns that we will not need to work with or that should be renamed to improve the clarity of the fields.
 
@@ -46,22 +51,76 @@ Rename:
 Write this to an object called `covid`.
 
 ```{r}
+#first removing specific columns and putting them into a temporary variable
+
+urltemp <-
+  select(url, -UID, -iso2, -iso3, -code3, Country_Region, -Lat, -Long_, -Combined_Key)
+
+
+
+#renaming Admin2 to 'County' and assigning it to the variable 'covid'
+
+covid <- rename(urltemp, County = Admin2)
+  
 
 ```
+
+
+
 
 3. Utilize the `tidycensus` package to read American Community Survey data at the county level for 2019 for the variable `B22007_002`. Call this new object `food_stamps`. It will be helpful downstream to rename the `estimate` and `moe` variables as `food_stamps_estimate` and `food_stamps_moe`. We also will not need the `variable` field.
 
-```{r}
+```{r} 
+#setting up my libraries
+
+library(tidyverse)
+library(tidycensus)
+
+census_api_key("dc7d515284d2934987f695bf00a56908f298cbd7", overwrite = TRUE)
+
+##I've been having trouble getting the census data installed into Rstudio, I've tried to complete this homework the best that I can from my class notes last week but I haven't been able to really run anything past this point so this is all my best guess
+##
 
 ```
+
+```{r}
+get_acs(geography = "county",
+        variables = "B22007_002")
+```
+
+
+```{r}
+food_stamps <-
+  load_variables(2019, 'keyfromacs')
+```
+
+```{r}
+food_stamps %>% 
+  filter(name == "B22007_002")
+```
+```{r}
+food_stamps <-
+  rename(food_stamps, estimate = food_stamps_estimate) %>% 
+  rename(food_stamps, moe = food_stamps_moe )
+```
+
 
 4. Re-shape the `covid` dataframe from wide to long such that there is a `date` column and a `deaths` column. Write this to a new dataframe called `covid_long`.
 
 ```{r}
-
+covid_long <-
+  covid %>% 
+  pivot_longer(names_from = variable,
+              values_from = estimate)
 ```
 
 5. The `FIPS` value in the `covid_long` dataset and the `GEOID` value in the `food_stamps` dataset represent the same unique ID for each county in the US. Currently, we cannot join the two fields together, though. What is the reason why this is not possible?
+
+```{r}
+##We cannot join the fields together because the FIPS field is a longer field of numbers specifying the exact area whereas the GEOID is a two digit code identifying the specific state
+##
+```
+
 
 Adjust the `FIPS` field in the `covid_long` dataset with the following code to fix the issue. Describe what this code is doing and why this will fix the initial issue.
 
@@ -71,12 +130,20 @@ covid_long <-
   mutate(FIPS = str_pad(FIPS, 5, pad = "0"))
 ```
 
+```{r}
+##This code changes the FIPS string so that after the first five digits in the FIPS field a zero is inserted to seperate those first 5 characters with the rest of the string
+##
+```
 
 
 6. Join the `food_stamps` dataframe to the `covid_long` dataframe. Identify the field in each dataframe that will be used as the primary key. Call this new dataframe `covid_joined`. After completing the join, you may notice the `County` and `Province_State` fields in relation to the `NAME` field as a confirmation that you successfully completed your join.
 
 ```{r}
 
+covid_joined <-
+  left_join(x = food_stamps,
+          y = covid_long,
+          suffix = c("_foodstamps", "_covid"))
 ```
 7. Our new data frame will require some light cleaning as well:
 
@@ -89,13 +156,32 @@ covid_long <-
 -   Assign this back to the `covid_joined` object.
 
 ```{r}
+#figure out what column names are available
+colnames(covid_joined)
+#create a variable to group them in an intuitive way
+col_order <- c("column1a","column1b", "column2a", "column2b")
 
+
+covid_joined <-
+  select(-NAME) %>% #remove 'NAME' column
+  covid_joined[, col_order] %>%  ##reorder the columns how you see fit
+  filter(!county %in% c("Unassigned")) %>% #filter out unassigned counties
+  date = as.Date(date, format = "%m/%d/%y") #fix the dates
+
+
+  
 ```
 
 8. How have the number of deaths changed over time for Delaware counties? Build a graph to support your answer. Interpret the graph.
 
 ```{r}
-
+covid_joined %>% 
+  select('DEcountyIDs','Date','Deathrate_county')
+   %>% 
+  ggplot(aes(x = Date,
+             y = Deathrate/count)) +
+  geom_col(fill = "DEcountyIDs") 
+ 
 ```
 
 9. Consider counties in Delaware, Maryland, Pennsylvania, New York, and New Jersey.
@@ -103,11 +189,21 @@ covid_long <-
 What is the per capita death rate for each county? Which county has the highest per capita death rate?
 
 ```{r}
-
+covid_joined %>% 
+  mutate(county_deathrates = Deathrate_county/population_county) %>% 
+  arrange(desc(county_deathrates)) %>% 
+  ggplot(aes(x = county_deathrates)) +
+  geom_bar() 
 ```
 
 10. Create a graph that demonstrates the relationship between food stamps per capita and deaths per capita for Delaware, Maryland, Pennsylvania, New York, and New Jersey. Interpret the graph.
 
 ```{r}
-
+covid_joined %>% 
+  mutate(state_death_rates = Deathrate_state/population_state) %>% 
+  mutate(state_foodstamp_rates = food_stamps_state/population_state)%>% 
+  ggplot(aes(x = states,
+             y = count)) +
+  geom_bar(fill = (state_death_rates,state_foodstamp_rates),
+           position = "avoid")
 ```
